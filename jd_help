@@ -1,0 +1,148 @@
+# -*- coding: utf-8 -*-
+import urllib
+import urllib2
+import re
+import json
+import sys
+import HTMLParser
+from lxml import etree
+from bs4 import BeautifulSoup
+reload(sys)
+sys.setdefaultencoding('utf-8')
+
+#获取价格
+def get_price(code):
+    url = 'https://p.3.cn/prices/mgets?skuIds=J_' + code
+    # 获取地址
+    request = urllib2.Request(url)
+    # 打开连接
+    response = urllib2.urlopen(request)
+    content = response.read()
+    result = json.loads(content)
+    json_fromat = result[0]
+    return result[0]['p']
+
+#获取商品名
+def get_name(code):
+    url = 'https://item.jd.com/%s.html' %code
+    request = urllib2.Request(url)
+    response = urllib2.urlopen(request)
+    content = response.read()
+    #url_str = content.decode('gbk').encode('utf-8')
+    url_str = etree.HTML(content)
+    url_str = BeautifulSoup(content,"lxml")
+    return url_str.title.string
+
+#获取满减和优惠券的字典信息
+def get_sale_value(code):
+    url = 'https://item.jd.com/%s.html' %code
+    request = urllib2.Request(url)
+    response = urllib2.urlopen(request)
+    content = response.read()
+    #content = content.decode('gbk').encode('utf-8')
+    cat_id = re.search(r'[0-9]{1,6},[0-9]{1,6},[0-9]{1,6}',content)
+    cat_id = re.sub(r'[^0-9]','%2C',cat_id.group())
+    shop_id = re.search(r'shopId.*',content)
+    shop_id = re.sub(r'[^0-9]','',shop_id.group())
+    ver_id = re.search(r'venderId.*',content)
+    ver_id = re.sub(r'[^0-9]','',ver_id.group())
+    price_url = 'https://cd.jd.com/promotion/v2?skuId=%s&area=1_72_2799_0&shopId=%s&venderId=%s&cat=%s' %(code,shop_id,ver_id,cat_id)
+    mup = urllib2.Request(price_url)
+    mup = urllib2.urlopen(mup)
+    mcont = mup.read()
+    price_list = mcont.decode('gbk').encode('utf-8')
+    price_list = json.loads(price_list)
+    return price_list
+
+#分析优惠券信息
+def get_coupons(code):
+    price_list = get_sale_value(code)
+    price_value = get_price(code)
+    filtration_value = re.sub('[^0-9,a-z,A-Z," "]',"",str(price_list)) #去除无效字符
+    full_price = re.findall('uquota [0-9]{1,9}',filtration_value) #满减条件中的满价格
+    cut_price = re.findall('udiscount [0-9]{1,9}',filtration_value) #满减条件中的减价格
+    begin_value = re.findall('ubeginTime u[0-9]{8}',filtration_value) #优惠券开始时间
+    end_value= re.findall('uendTime u[0-9]{8}',filtration_value) #优惠券截止时间
+    full_cut_list = [ ]
+    if len(full_price)  >= 2:
+        count = 0
+        for i in range(0,len(full_price)):
+            count += 1
+            pull_action = pull_sale(float(price_value), int(full_price[i][7:]), int(cut_price[i][10:]), 'Y')
+            full_cut = '-------优惠券%s:满%s减%s|可用时间段%s日至%s日\n优惠方案:\n%s' %(count,full_price[i][7:],cut_price[i][10:],begin_value[i][12:],end_value[i][10:],pull_action)
+            full_cut_list.append(full_cut)
+        return full_cut_list
+    elif len(full_price)  == 1:
+        full_price = str(full_price)
+        cut_price = str(cut_price)
+        begin_value = str(begin_value)
+        end_value = str(end_value)
+        pull_action = pull_sale(float(price_value),int(full_price[9:-2]),int(cut_price[12:-2]),'Y')
+        collect_value = '-------优惠券:满%s减%s|可用时间段%s日至%s日\n优惠方案:\n%s' % (full_price[9:-2], cut_price[12:-2],begin_value[14:-2],end_value[12:-2],pull_action)
+        return collect_value
+    else:
+        return '暂时没有优惠券信息'
+
+#分析促销信息
+def get_sale(code):
+    price_list = get_sale_value(code)
+    value_list = []
+    for k, v in price_list.items():
+        value_list.append(v)
+    value_str = str(value_list)
+    sale_number = 0
+    sale_mess_list = []
+    for i in value_str.split(','):
+        if 'content' in i:
+            sale_number += 1
+            sale_mess = '促销方式%s:%s' %(sale_number,i[15:-1].decode('unicode_escape'))
+            sale_mess_list.append(sale_mess)
+    if sale_mess_list:
+        return sale_mess_list
+    else:
+        return '暂时没有促销信息'
+
+def pull_sale(jg,mv,jv,mm):
+    if jg < mv: #商品价格小于满减门槛,购买多件产品使用满减或者购买其他产品凑单
+        cu1 = mv / jg
+        cu2 = mv // jg
+        if cu2 > 0:
+            cu1 += 1
+            cu3 = jg * cu1
+            cu4 = cu3 - jv
+            cu5 = cu4 / float(cu1)
+            cu6 = mv - jg
+            cu7 = mv - jv
+            mess_1 = '''使用满减优惠方式需要购买产品:%d件,总价:%d元,优惠方式减免:%d元,实付价:%d元,到手单价:%s元/1件
+使用凑单优惠方式需要购买产品:1件,还需购买价格%s元的凑单产品,凑单达到%s元,优惠方式减免%s元,实付价:%s元''' % (cu1, cu3, jv, cu4, round(cu5,2),cu6, mv, jv, cu7)
+            return mess_1
+    elif jg >= mv:
+        if mm == 'Y':
+            cu1 = jg / mv
+            cu2 = jv * int(cu1)
+            cu3 = float(jg) - float(cu2)
+            return '1使用当前优惠方式需要购买产品:1件,总价:%d元,优惠方式减免:%d元,到手价:%d元' % (jg, cu2, cu3)
+        elif mm == 'N': #满减方式中每满XX减XX的运算
+            cu1 = float(jg) - float(jv)
+            return '2使用当前优惠方式需要购买产品:1件,总价:%s元,优惠方式减免:%s元,到手价:%s元' % (jg, jv, float(cu1))
+
+code= '15119924929'
+print '您关注产品为: %s' %get_name(code)
+print '当前的价格为: %s' %get_price(code)
+print '==========================================优惠券信息=========================================='
+if isinstance(get_coupons(code),list):
+    print  '当前有多张优惠券可用'
+    for i in get_coupons(code):
+        print '-------%s' %i
+else:
+    print get_coupons(code)
+print '===========================================促销信息==========================================='
+if isinstance(get_sale(code), list):
+    if len(get_sale(code)) >= 2:
+        print '-----------------当前有多种满减促销可用-----------------'
+        for i in get_sale(code):
+            print '-------%s' %i
+    else:
+        print '-------%s' %(get_sale(code)[0])
+else:
+    print '-------%s' %get_sale(code)

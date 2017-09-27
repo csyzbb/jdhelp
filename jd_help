@@ -102,30 +102,6 @@ def get_sale(code):
     else:
         return '暂时没有促销信息'
 
-def pull_sale(jg,mv,jv,mm):
-    if jg < mv: #商品价格小于满减门槛,购买多件产品使用满减或者购买其他产品凑单
-        cu1 = mv / jg
-        cu2 = mv // jg
-        if cu2 > 0:
-            cu1 += 1
-            cu3 = jg * cu1
-            cu4 = cu3 - jv
-            cu5 = cu4 / float(cu1)
-            cu6 = mv - jg
-            cu7 = mv - jv
-            mess_1 = '''使用满减优惠方式需要购买产品:%d件,总价:%d元,优惠方式减免:%d元,实付价:%d元,到手单价:%s元/1件
-使用凑单优惠方式需要购买产品:1件,还需购买价格%s元的凑单产品,凑单达到%s元,优惠方式减免%s元,实付价:%s元''' % (cu1, cu3, jv, cu4, round(cu5,2),cu6, mv, jv, cu7)
-            return mess_1
-    elif jg >= mv:
-        if mm == 'Y':
-            cu1 = jg / mv
-            cu2 = jv * int(cu1)
-            cu3 = float(jg) - float(cu2)
-            return '1使用当前优惠方式需要购买产品:1件,总价:%d元,优惠方式减免:%d元,到手价:%d元' % (jg, cu2, cu3)
-        elif mm == 'N': #满减方式中每满XX减XX的运算
-            cu1 = float(jg) - float(jv)
-            return '2使用当前优惠方式需要购买产品:1件,总价:%s元,优惠方式减免:%s元,到手价:%s元' % (jg, jv, float(cu1))
-
 code= '15119924929'
 print '您关注产品为: %s' %get_name(code)
 print '当前的价格为: %s' %get_price(code)
